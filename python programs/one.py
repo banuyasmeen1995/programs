@@ -219,25 +219,25 @@ Created on Fri Sep  9 11:11:03 2022
 
 #format
 
-print("hello {}".format("Banu"))
-print("Hello{1} and {0}".format("hi","hello"))
-print("Hello{0} and {1}".format("hi","hello"))
-print("Hello{a} and {b}".format(a="hi",b="hello"))
-name="Banu Yasmeen"
-salary=90000
-print("Her name is %s\n Her salary is %d"%(name,salary))
+# print("hello {}".format("Banu"))
+# print("Hello{1} and {0}".format("hi","hello"))
+# print("Hello{0} and {1}".format("hi","hello"))
+# print("Hello{a} and {b}".format(a="hi",b="hello"))
+# name="Banu Yasmeen"
+# salary=90000
+# print("Her name is %s\n Her salary is %d"%(name,salary))
 
 
-def greeting(x):
-    print("hello ",x.capitalize())
-    print("hello",x.casefold())
-    print("hello",x.upper())
-    print("hello",x.lower())
-    print("hello",x.title())
+# def greeting(x):
+#     print("hello ",x.capitalize())
+#     print("hello",x.casefold())
+#     print("hello",x.upper())
+#     print("hello",x.lower())
+#     print("hello",x.title())
 
-name=input("Please name")
-greeting(name)
-greeting("banu")
+# name=input("Please name")
+# greeting(name)
+# greeting("banu")
 # number=int(input("Please enter the number you would like to check"))
 # if number>1:
 #     for i in range(2,int(number/2)+1):
