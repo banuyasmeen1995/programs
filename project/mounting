@@ -1,0 +1,6 @@
+dbutils.fs.mount(
+  source: str,
+  mount_point: str,
+  encryption_type: Optional[str] = "",
+  extra_configs: Optional[dict[str:str]] = None
+)
