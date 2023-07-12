@@ -1,0 +1,939 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
+import pandas as pd
+import numpy as np
+import pyodbc
+import os
+import openpyxl
+import glob
+import os.path, time
+import smtplib, ssl
+import datetime
+import sqlalchemy as sa
+import shutil
+from sqlalchemy import create_engine, MetaData, Table, event
+from sqlalchemy.orm import mapper
+from sqlalchemy.sql import select
+import time
+from datetime import datetime
+import sys
+from collections import Iterable
+
+
+# In[2]:
+
+
+conn = pyodbc.connect('Driver={SQL Server};'
+                      'Server=CPCWVISSSQLD02\DSC2D;'
+                      'Database=CS_360SELL_D1;'
+                      'Trusted_Connection=yes;'
+                     )
+
+cursor = conn.cursor()
+
+
+# In[3]:
+
+
+SERVER='CPCWVISSSQLD02\DSC2D'
+DATABASE='CS_360SELL_D1'
+DRIVER='SQL Server Native Client 11.0'
+
+# In[ ]:
+
+
+engine = create_engine('mssql+pyodbc://@' + SERVER + '/' + DATABASE + '?driver=SQL+Server', fast_executemany=True)
+connection = engine.connect()
+
+
+# In[ ]:
+
+
+os.chdir(r'\\entsserver21.americas.manulife.net\dfs\Shared\can\Cross-sell\BU_GB\2019 (HATTR)\Campaigns\GB Transitions\GB-Journey_Monthly-Subscriber-Reports')
+
+
+# In[ ]:
+
+
+def flatten(lis):
+     for item in lis:
+         if isinstance(item, Iterable) and not isinstance(item, str):
+             for x in flatten(item):
+                 yield x
+         else:        
+             yield item
+
+
+# In[ ]:
+
+
+def csvextraction(pattern):
+    xlsfiles = glob.glob("{}*.csv".format(pattern))
+    return xlsfiles
+
+
+# In[ ]:
+
+
+pattern = ["GB_Terminations_Emails_Sent_Subscribers_Level_"]
+
+csvfile = []
+
+for i in range(len(pattern)):
+    files = csvextraction(pattern[i])
+    csvfile.append(files)
+    
+
+
+# In[ ]:
+
+
+csvfile = list(flatten(csvfile))
+# csvfile
+
+
+# In[ ]:
+
+
+    latestfile = max(csvfile, key=os.path.getmtime)
+    latestfile
+
+
+# In[ ]:
+
+
+
+print("last modified: %s" % time.ctime(os.path.getmtime(latestfile)))
+print("created: %s" % time.ctime(os.path.getctime(latestfile)))
+
+
+# In[ ]:
+
+
+FileDate = time.ctime(os.path.getmtime(latestfile))
+FileDate
+
+
+# In[ ]:
+
+
+latestfile
+
+
+# In[ ]:
+
+
+# df.str.split(',', expand=True)
+
+
+# In[ ]:
+
+
+df = pd.read_csv(latestfile, encoding = "utf-16")
+
+
+# In[ ]:
+
+
+len(df)
+
+
+# In[ ]:
+
+
+columns = ['Email Address', 'First Name', 'Last Name', 'Province']
+
+
+# In[ ]:
+
+
+df.drop(columns, axis = 1, inplace = True)
+
+
+# In[ ]:
+
+
+df['FileDate'] = time.ctime(os.path.getmtime(latestfile))
+
+df['FileDate'] = pd.to_datetime(df['FileDate']).dt.strftime('%Y-%m-%d')
+
+
+# In[ ]:
+
+
+df['Campaign Date'] = pd.to_datetime(df['Campaign Date']).dt.strftime('%Y-%m-%d')
+
+
+# In[ ]:
+
+
+df['Sent Date'] = pd.to_datetime(df['Sent Date']).dt.strftime('%Y-%m-%d')
+
+
+# In[ ]:
+
+
+df['ClientNumber'] = df['Person_ID'].str.split('_').str[0]
+
+
+# # Remove leading zeros after splitting 
+
+# In[ ]:
+
+
+df['CertificateNumber'] = df['Person_ID'].str.split('_').str[1]
+
+
+# In[ ]:
+
+
+df.columns = df.columns.str.replace(' ', '')
+
+
+# In[ ]:
+
+
+df.drop('Person_ID', axis = 1, inplace = True)
+
+
+# In[ ]:
+
+
+df = df.drop_duplicates(subset=['CampaignDate','EmailName','SentDate', 'JourneyName', 'ClientNumber', 'CertificateNumber'], keep="first")
+
+
+# In[ ]:
+
+
+len(df)
+
+
+# In[ ]:
+
+
+# df['ClientNumber'] = df['ClientNumber'].astype('int64')
+
+
+# In[ ]:
+
+
+df['ProcessDate'] = datetime.now().strftime('%Y-%m-%d')
+
+
+# In[ ]:
+
+
+df.rename(columns = {'CertificateNumber': 'CertificateNum'}, inplace = True)
+df['PolicyNum'] = np.nan
+df['ClientName'] = np.nan
+df['ContactID'] = np.nan
+df['FirstName'] = np.nan
+df['LastName'] = np.nan
+df['DOB'] = np.nan
+df['Program'] = np.nan
+df['MarketingSegment'] = np.nan
+df['EmailNum'] = np.nan
+
+
+# In[ ]:
+
+
+df.rename(columns = {'ClientNumber':'ClientNum'}, inplace = True)
+df.rename(columns = {'ClientNumber':'ClientNum'}, inplace = True)
+df.rename(columns = {'SourceSystem':'System'}, inplace = True)
+df['ClientNum'] = df['ClientNum'].str.lstrip('0')
+df['CertificateNum'] = df['CertificateNum'].str.lstrip('0')
+
+
+# In[ ]:
+
+
+df
+
+
+# In[ ]:
+
+
+neworder = ['PolicyNum','CertificateNum','ClientNum','ClientName', 'ContactID', 'FirstName','LastName','DOB','Program','MarketingSegment', 'CampaignDate', 'SentDate', 'Language', 'JourneyName', 'EmailName',  'EmailNum', 'System', 'FileDate','ProcessDate']
+df = df.reindex(columns=neworder)
+
+
+# In[ ]:
+
+
+length = len(df.columns)
+
+
+# In[ ]:
+
+
+start_time = time.time()
+df.to_sql("leadlist_gbtrans_email", engine, chunksize = int(2100/length)-1, method='multi', index=False, if_exists='append', schema="dbo")
+print("--- %d seconds ---" % (time.time() - start_time))
+
+
+# # AgeOut Dependent
+
+# In[ ]:
+
+
+pattern = ["GB_Age_Out_Emails_Sent_Subscribers_Level_Members_"]
+
+ageout_sub = []
+
+for i in range(len(pattern)):
+    files = csvextraction(pattern[i])
+    ageout_sub.append(files)
+
+
+# In[ ]:
+
+
+ageout_sub = list(flatten(ageout_sub))
+
+
+# In[ ]:
+
+
+ageout_sub = max(ageout_sub, key=os.path.getmtime)
+ageout_sub
+
+
+# In[ ]:
+
+
+df_ageout_sub = pd.read_csv(ageout_sub, encoding = "utf-16")
+
+
+# In[ ]:
+
+
+df_ageout_sub
+
+
+# In[ ]:
+
+
+ageout_columns = ['Email Address', 'First Name']
+df_ageout_sub.drop(ageout_columns, axis = 1, inplace = True)
+
+df_ageout_sub.rename(columns={'Campaign Member ID':'ContactID'}, inplace=True)
+
+df_ageout_sub['Campaign Date'] = pd.to_datetime(df_ageout_sub['Campaign Date']).dt.strftime('%Y-%m-%d')
+
+df_ageout_sub['Sent Date'] = pd.to_datetime(df_ageout_sub['Sent Date']).dt.strftime('%Y-%m-%d')
+
+df_ageout_sub['ClientNumber'] = df_ageout_sub['Person_ID'].str.split('_').str[0]
+df_ageout_sub['CertificateNumber'] = df_ageout_sub['Person_ID'].str.split('_').str[1]
+
+df_ageout_sub.columns = df_ageout_sub.columns.str.replace(' ', '')
+
+df_ageout_sub.drop('Person_ID', axis = 1, inplace = True)
+
+df_ageout_sub = df_ageout_sub.drop_duplicates(subset=['CampaignDate','EmailName','SentDate', 'JourneyName', 'ClientNumber', 'CertificateNumber'], keep="first")
+
+df_ageout_sub['ClientNumber'] = df_ageout_sub['ClientNumber'].astype('int64')
+
+df_ageout_sub['FileDate'] = time.ctime(os.path.getmtime(ageout_sub))
+df_ageout_sub['FileDate'] = pd.to_datetime(df_ageout_sub['FileDate']).dt.strftime('%Y-%m-%d')
+
+df_ageout_sub['ProcessDate'] = datetime.now().strftime('%Y-%m-%d')
+
+
+# In[ ]:
+
+
+# df_ageout_sub = df_ageout_sub[['CampaignDate', 'EmailName', 'SentDate', 'JourneyName','ClientNumber', 'CertificateNumber', 'FileDate', 'ProcessDate', 'ContactID']]
+
+
+# In[ ]:
+
+
+df_ageout_sub
+
+
+# In[ ]:
+
+
+df_ageout_sub.rename(columns = {'CertificateNumber': 'CertificateNum'}, inplace = True)
+df_ageout_sub['PolicyNum'] = np.nan
+df_ageout_sub['ClientName'] = np.nan
+df_ageout_sub['FirstName'] = np.nan
+df_ageout_sub['LastName'] = np.nan
+df_ageout_sub['DOB'] = np.nan
+df_ageout_sub['Program'] = np.nan
+df_ageout_sub['MarketingSegment'] = np.nan
+df_ageout_sub['EmailNum'] = np.nan
+
+
+# In[ ]:
+
+
+df_ageout_sub.rename(columns = {'ClientNumber':'ClientNum'}, inplace = True)
+df_ageout_sub.rename(columns = {'ClientNumber':'ClientNum'}, inplace = True)
+
+
+# In[ ]:
+
+
+
+# df_ageout_sub['ClientNum'] = df_ageout_sub['ClientNum'].str.lstrip('0')
+# df_ageout_sub['CertificateNum'] = df_ageout_sub['CertificateNum'].str.lstrip('0')
+
+
+# In[ ]:
+
+
+df_ageout_sub.rename(columns = {'SourceSystem':'System'}, inplace = True)
+
+
+# In[ ]:
+
+
+neworder = ['PolicyNum','CertificateNum','ClientNum','ClientName', 'ContactID', 'FirstName','LastName','DOB','Program','MarketingSegment', 'CampaignDate', 'SentDate', 'Language', 'JourneyName', 'EmailName',  'EmailNum', 'System', 'FileDate','ProcessDate']
+df_ageout_sub = df_ageout_sub.reindex(columns=neworder)
+
+
+# In[ ]:
+
+
+length = len(df_ageout_sub.columns)
+
+start_time = time.time()
+df_ageout_sub.to_sql("leadlist_gbtrans_email", engine, chunksize = int(2100/length)-1, method='multi', index=False, if_exists='append', schema="dbo")
+print("--- %d seconds ---" % (time.time() - start_time)) 
+
+
+# In[ ]:
+
+
+pattern = ["GB_Age_Out_Emails_Sent_Subscribers_Level_Dependents_"]
+
+ageout_dep = []
+
+for i in range(len(pattern)):
+    files = csvextraction(pattern[i])
+    ageout_dep.append(files)
+    
+# ageout_dep
+
+
+# In[ ]:
+
+
+ageout_dep = list(flatten(ageout_dep))
+# ageout_dep
+
+
+# In[ ]:
+
+
+ageout_dep = max(ageout_dep, key=os.path.getmtime)
+ageout_dep
+
+
+# In[ ]:
+
+
+df_ageout_dep = pd.read_csv(ageout_dep, encoding = "utf-16")
+
+
+# In[ ]:
+
+
+df_ageout_dep
+
+
+# In[ ]:
+
+
+ageout_columns = ['Email Address', 'First Name']
+df_ageout_dep.drop(ageout_columns, axis = 1, inplace = True)
+
+df_ageout_dep.rename(columns={'Campaign Member ID':'ContactID'}, inplace=True)
+
+df_ageout_dep['Campaign Date'] = pd.to_datetime(df_ageout_dep['Campaign Date']).dt.strftime('%Y-%m-%d')
+
+df_ageout_dep['Sent Date'] = pd.to_datetime(df_ageout_dep['Sent Date']).dt.strftime('%Y-%m-%d')
+
+df_ageout_dep['ClientNumber'] = df_ageout_dep['Person_ID'].str.split('_').str[0]
+df_ageout_dep['CertificateNumber'] = df_ageout_dep['Person_ID'].str.split('_').str[1]
+
+df_ageout_dep.columns = df_ageout_dep.columns.str.replace(' ', '')
+
+df_ageout_dep.drop('Person_ID', axis = 1, inplace = True)
+
+df_ageout_dep = df_ageout_dep.drop_duplicates(subset=['CampaignDate','EmailName','SentDate', 'JourneyName', 'ClientNumber', 'CertificateNumber'], keep="first")
+
+#check leading zeros
+df_ageout_dep['ClientNumber'] = df_ageout_dep['ClientNumber'].astype('int64')
+
+df_ageout_dep['FileDate'] = time.ctime(os.path.getmtime(ageout_dep))
+df_ageout_dep['FileDate'] = pd.to_datetime(df_ageout_dep['FileDate']).dt.strftime('%Y-%m-%d')
+
+df_ageout_dep['ProcessDate'] = datetime.now().strftime('%Y-%m-%d')
+
+
+# In[ ]:
+
+
+# df_ageout_dep = df_ageout_dep[['CampaignDate', 'EmailName', 'SentDate', 'JourneyName','ClientNumber', 'CertificateNumber', 'FileDate', 'ProcessDate', 'ContactID']]
+
+
+# In[ ]:
+
+
+df_ageout_dep
+
+
+# In[ ]:
+
+
+df_ageout_dep.rename(columns = {'CertificateNumber': 'CertificateNum','ClientNumber':'ClientNum'}, inplace = True)
+df_ageout_dep['PolicyNum'] = np.nan
+df_ageout_dep['ClientName'] = np.nan
+df_ageout_dep['FirstName'] = np.nan
+df_ageout_dep['LastName'] = np.nan
+df_ageout_dep['DOB'] = np.nan
+df_ageout_dep['Program'] = np.nan
+df_ageout_dep['MarketingSegment'] = np.nan
+df_ageout_dep['EmailNum'] = np.nan
+
+
+# In[ ]:
+
+
+df_ageout_dep.rename(columns = {'ClientNumber':'ClientNum'}, inplace = True)
+df_ageout_dep.rename(columns = {'ClientNumber':'ClientNum'}, inplace = True)
+
+
+# In[ ]:
+
+
+# df_ageout_dep['ClientNum'] = df_ageout_dep['ClientNum'].str.lstrip('0')
+# df_ageout_dep['CertificateNum'] = df_ageout_dep['CertificateNum'].str.lstrip('0')
+
+
+# In[ ]:
+
+
+df_ageout_dep.rename(columns = {'SourceSystem':'System'}, inplace = True)
+
+
+# In[ ]:
+
+
+neworder = ['PolicyNum','CertificateNum','ClientNum','ClientName', 'ContactID', 'FirstName','LastName','DOB','Program','MarketingSegment', 'CampaignDate', 'SentDate', 'Language', 'JourneyName', 'EmailName',  'EmailNum', 'System', 'FileDate','ProcessDate']
+df_ageout_dep = df_ageout_dep.reindex(columns=neworder)
+
+
+# In[ ]:
+
+
+df_ageout_dep = df_ageout_dep.drop_duplicates(subset=['CampaignDate','EmailName','SentDate', 'JourneyName', 'ClientNum', 'CertificateNum'], keep="first")
+
+
+# In[ ]:
+
+
+length = len(df_ageout_dep.columns)
+
+start_time = time.time()
+df_ageout_dep.to_sql("leadlist_gbtrans_email", engine, chunksize = int(2100/length)-1, method='multi', index=False, if_exists='append', schema="dbo")
+print("--- %d seconds ---" % (time.time() - start_time)) 
+
+
+# In[ ]:
+
+
+step1_query = """
+UPDATE dbo.leadlist_gbtrans_email
+set Program = case 
+when JourneyName like '%GB%Age%Out%' then 'GB AgeOut' when JourneyName like '%GB%Term%' then 'GB Terminations' else 'check' end
+
+,MarketingSegment = case 
+when JourneyName like '%GB%Age%Out%' and EmailName like '%Depend%' then 'D'
+when JourneyName like '%GB%Age%Out%' and EmailName like '%Member%' then 'S'
+when JourneyName like '%GB%Term%' and EmailName like '%18to24%' then '18-24'
+when JourneyName like '%GB%Term%' and EmailName like '%25to54%' then '25-54'
+when JourneyName like '%GB%Term%' and EmailName like '%-55-%' then '55+'
+when JourneyName like '%GB%Term%' and EmailName like '%-Generic-%' then 'Generic Terms'
+end
+
+,Language = case 
+when EmailName like '%EN' or EmailName like '%-EN-%' or EmailName like '%- EN -%' then 'E' 
+when EmailName like '%FR' or EmailName like '%-FR-%' or EmailName like '%- FR -%' then 'F' else 'check' end
+
+,EmailNum= case 
+when EmailName like '%email 1%' or emailname like '%em1%' or emailname like '%W1' or emailname LIKE '%60%' or emailname LIKE '%-01-%' then 'EM 1'
+when emailname like '%email 2%' or emailname like '%em2%' or emailname like '%W2' or emailname LIKE '%30%' or emailname LIKE '%-02-%' then 'EM 2'
+when emailname like '%email 3%' or emailname like '%em3%' or emailname like '%W3' or emailname LIKE '%10%' or emailname LIKE '%-03-%' then 'EM 3'
+end
+,System = 'MC'
+where ProcessDate = Convert(date, getdate());
+
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step1_query)
+# conn.commit()
+
+
+# In[ ]:
+
+
+step2_query = """
+update leadlist_gbtrans_email
+set ClientName = b.ClientName, FirstName = b.FirstNm, LastName = b.LastNm, DOB = b.BirthDt
+from leadlist_gbtrans_email a
+inner join gb_mc_all_hd_ids_unique b
+on cast(a.CertificateNum as varchar) = cast(b.CertificateNum as varchar)
+and cast(a.ClientNum as int) = cast(b.ClientNum as int)
+where (a.FirstName is null or a.FirstName = '') and (a.LastName is null or a.LastName = '') and (a.DOB is null or a.DOB = '');
+
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step2_query)
+# conn.commit()
+
+
+# In[ ]:
+
+
+step3a_query = """
+update dbo.leadlist_gbtrans_email
+set PolicyNum = b.Policy
+from dbo.leadlist_gbtrans_email a
+inner join gb_termination_dm_excluded b
+on cast(a.CertificateNum as varchar) = cast(b.Certificate as varchar)
+and cast(a.ClientNum as int) = cast(b.ClientNum as int)
+where a.PolicyNum is null
+and b.ClientNum is not null and b.ClientNum <> '';
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step3a_query)
+# conn.commit()
+
+
+# In[ ]:
+
+
+# cursor.close()
+# cursor = conn.cursor()
+
+
+# In[ ]:
+
+
+step3bii_query = """
+update dbo.leadlist_gbtrans_email
+set PolicyNum = b.PolicyNum
+from dbo.leadlist_gbtrans_email a
+inner join 
+(
+select distinct concat(CertificateNum,'_',ClientNum) as cert_clt, CertificateNum, ClientNum, PolicyNum, FirstNm, LastNm, BirthDt 
+from gb_mc_all_hd_ids where BeneCdNm = 'EHC'
+) b
+on cast(a.CertificateNum as varchar) = cast(b.CertificateNum as varchar)
+and cast(a.ClientNum as int) = cast(b.ClientNum as int)
+where a.PolicyNum is null
+and b.ClientNum is not null and b.ClientNum <> '';
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step3bii_query)
+
+
+# In[ ]:
+
+
+# cursor.close()
+# cursor = conn.cursor()
+
+
+# In[ ]:
+
+
+step4a_query = """
+update leadlist_gbtrans_email
+set FirstName = b.FirstNm, LastName = b.LastNm, CertificateNum = b.CertificateNum, ClientName = b.ClientName
+from leadlist_gbtrans_email a
+inner join gb_mc_all_hd_ids b
+on cast(a.PolicyNum as int) = cast(b.PolicyNum as int)
+and a.CertificateNum = b.CertificateNum
+and cast(a.ClientNum as int) = cast(b.ClientNum as int)
+where a.PolicyNum is not null and FirstName is null
+and b.PolicyNum not like '%[A-Za-z]%';
+
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step4a_query)
+# conn.commit()
+
+
+# In[ ]:
+
+
+step4b_query = """
+update leadlist_gbtrans_email
+set FirstName = b.FirstName, LastName = b.LastName, CertificateNum = b.Certificate, ClientName = b.Employer_Name
+from leadlist_gbtrans_email a
+inner join gb_termination_dm_excluded b
+on cast(a.PolicyNum as int) = cast(b.Policy as int)
+and a.CertificateNum = b.Certificate
+and cast(a.ClientNum as int) = cast(b.ClientNum as int)
+where a.PolicyNum is not null and a.FirstName is null
+and b.Policy not like '%[A-Za-z]%';
+
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step4b_query)
+# conn.commit()
+
+
+# # Make ClientName in proper format
+
+# In[ ]:
+
+
+step5 = """
+update leadlist_gbtrans_email
+set ClientName = rtrim(ltrim(dbo.Proper_Case(ClientName)))
+"""
+cursor.execute(step5)
+
+
+step6 = """
+update leadlist_gbtrans_email
+set ClientName = NULL
+where ClientName = ''
+"""
+
+cursor.execute(step6)
+
+
+# In[ ]:
+
+
+step7 = """
+update leadlist_gbtrans_email
+set FirstName = rtrim(ltrim(dbo.Proper_Case(FirstName)))
+"""
+cursor.execute(step7)
+
+
+step8 = """
+update leadlist_gbtrans_email
+set FirstName = NULL
+where FirstName = ''
+"""
+
+cursor.execute(step8)
+
+
+# In[ ]:
+
+
+step9 = """
+update leadlist_gbtrans_email
+set LastName = rtrim(ltrim(dbo.Proper_Case(LastName)))
+"""
+cursor.execute(step9)
+
+
+step10 = """
+update leadlist_gbtrans_email
+set LastName = NULL
+where LastName = ''
+"""
+
+cursor.execute(step10)
+
+
+# In[ ]:
+
+
+step11 = """
+UPDATE leadlist_gbtrans_email
+SET policynum = SUBSTRING(policynum, PATINDEX('%[^0 ]%', policynum + ' '), LEN(policynum))
+WHERE left(policynum,1)='0'
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step11)
+
+
+# # Removing white spaces from PolicyNum, CertificateNum and ClientNum columns
+
+# In[ ]:
+
+
+step12 = """
+update leadlist_gbtrans_email
+set PostalCode = b.PostalCode
+from leadlist_gbtrans_email a
+inner join ref_gbterm_em_ma_pcode_lookup b
+on cast(a.CertificateNum as varchar) = cast(b.CertificateNum as varchar)
+and cast(a.PolicyNum as int) = cast(b.PolicyNum as int)
+where (a.PostalCode is null or a.PostalCode  = '') AND b.PostalCode is not null and b.PostalCode <> '' and b.PostalCode like '[A-Z][0-9][A-Z] [0-9][A-Z][0-9]'
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step12)
+
+
+# In[ ]:
+
+
+step13 = """
+UPDATE leadlist_gbtrans_email
+SET PolicyNum = LTRIM(RTRIM(PolicyNum))
+WHERE PolicyNum LIKE '% ' OR PolicyNum LIKE ' %'
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step13)
+
+
+# In[ ]:
+
+
+step14 = """
+UPDATE leadlist_gbtrans_email
+SET CertificateNum = LTRIM(RTRIM(CertificateNum))
+WHERE CertificateNum LIKE '% ' OR CertificateNum LIKE ' %'
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step14)
+
+
+# In[ ]:
+
+
+step15 = """
+UPDATE leadlist_gbtrans_email
+SET ClientNum = LTRIM(RTRIM(ClientNum))
+WHERE ClientNum LIKE '% ' OR ClientNum LIKE ' %'
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(step15)
+
+
+# In[ ]:
+
+
+conn.commit()
+
+
+# In[ ]:
+
+
+# cursor.close()
+cursor = conn.cursor()
+
+
+# In[ ]:
+
+
+delete_query = "delete from dbo.leadlist_gb_transitions where EMInd = 1 and DMInd = 0;"
+
+
+# In[ ]:
+
+
+cursor.execute(delete_query)
+# conn.commit()
+
+
+# In[ ]:
+
+
+insert_query = """
+insert into dbo.leadlist_gb_transitions
+select
+cast(REPLICATE('0',7-LEN(cast(PolicyNum as varchar))) + cast(PolicyNum as varchar) as varchar) as PolicyNum
+, cast(replace(ltrim(replace(ltrim(rtrim(CertificateNum)),'0',' ')),' ','0') as varchar) as CertificateNum
+, cast(replace(ltrim(replace(ltrim(rtrim([ClientNum])),'0',' ')),' ','0') as varchar) as ClientNum
+, dbo.Proper_Case(ClientName) as ClientName
+, NULL as LocationNum
+, NULL as ClassNum
+, NULL as [Plan]
+, NULL as TermDt
+, dbo.Proper_Case(rtrim(ltrim(FirstName))) as FirstName
+, dbo.Proper_Case(rtrim(ltrim(LastName))) as LastName
+, DOB
+, NULL as InsuredFirstName
+, NULL as InsuredLastName
+, NULL as InsuredDOB
+, PostalCode
+, Program
+, MarketingSegment
+, SentDate
+, [Language]
+, NULL as Emailaddress
+, EmailNum as [Description]
+, NULL as DM_Type
+, '0' as DMInd
+, '0' as OBInd
+, '1' as EMInd
+, [System]
+from dbo.leadlist_gbtrans_email
+where PolicyNum is not null and PolicyNum <> '';
+"""
+
+
+# In[ ]:
+
+
+cursor.execute(insert_query)
+conn.commit()
+
+
+# In[ ]:
+
+
+
+
