@@ -1,0 +1,240 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
+import pandas as pd
+import numpy as np
+import pyodbc
+import sqlalchemy as sa
+from sqlalchemy import create_engine, MetaData, Table, event
+# from fast_to_sql.fast_to_sql import fast_to_sql
+import time
+import os
+
+
+# In[2]:
+
+
+datalab_conn = pyodbc.connect('Driver={SQL Server};'
+                      'Server=CPCWVISSSQLD02\DSC2D;'
+                      'Database=CS_360SELL_D1;'
+                      'Trusted_Connection=yes;'
+                     )
+
+datalab_cursor = datalab_conn.cursor()
+
+
+# In[3]:
+
+
+mc_conn = pyodbc.connect('Driver={SQL Server};'
+                      'Server=al13cdn_p010.americas.manulife.net,31571;'
+                      'Database=INST_MC_PSS_P1;'
+                      'Trusted_Connection=yes;'
+                     )
+
+mc_cursor = mc_conn.cursor()
+
+
+# In[4]:
+
+
+SERVER='CPCWVISSSQLD02\DSC2D'
+DATABASE='CS_360SELL_D1'
+DRIVER='SQL Server Native Client 11.0'
+
+
+# In[5]:
+
+
+engine = create_engine('mssql+pyodbc://@' + SERVER + '/' + DATABASE + '?driver=SQL+Server', fast_executemany=True)
+connection = engine.connect()
+
+
+# In[6]:
+
+
+drop_table_schema="drop table dbo.metadata_table_schema"
+drop_table_dates="drop table dbo.metadata_table_dates"
+drop_table_counts="drop table dbo.metadata_table_counts"
+
+
+# In[7]:
+
+
+# execute drop table schema
+try:
+    datalab_cursor.execute(drop_table_schema)
+    datalab_conn.commit()
+except pyodbc.ProgrammingError:
+    pass
+
+
+# In[8]:
+
+
+# execute drop table dates
+try:
+    datalab_cursor.execute(drop_table_dates)
+    datalab_conn.commit()
+except pyodbc.ProgrammingError:
+    pass
+
+
+# In[9]:
+
+# execute drop table counts
+try:
+    datalab_cursor.execute(drop_table_counts)
+    datalab_conn.commit()
+except pyodbc.ProgrammingError:
+    pass
+
+
+# In[10]:
+
+
+query= """
+select 
+    TableCatelog = tbl.TABLE_CATALOG,
+    TableName = tbl.table_schema + '.' + tbl.table_name, 
+    --TableDescription = prop.value,
+    ColumnName = col.column_name, 
+    ColumnDataType = col.data_type,
+ColumnNullable=col.is_nullable,
+ColumnMaxLength=col.character_maximum_length
+into dbo.metadata_table_schema
+FROM information_schema.tables tbl
+INNER JOIN information_schema.columns col 
+    ON col.table_name = tbl.table_name
+    AND col.table_schema = tbl.table_schema
+LEFT JOIN sys.extended_properties prop 
+    ON prop.major_id = object_id(tbl.table_schema + '.' + tbl.table_name) 
+    AND prop.minor_id = 0
+    AND prop.name = 'MS_Description' 
+WHERE tbl.table_type = 'base table'
+order by tbl.table_schema + '.' + tbl.table_name
+"""
+
+
+# In[11]:
+
+
+query2 = """select * into dbo.metadata_table_dates from sys.objects
+where type='u'
+order by modify_date desc
+"""
+
+
+# In[12]:
+
+
+query3 = """SELECT 
+    sc.name +'.'+ ta.name TableName, SUM(pa.rows) RowCnt
+into dbo.metadata_table_counts
+FROM 
+    sys.tables ta
+INNER JOIN sys.partitions pa
+    ON pa.OBJECT_ID = ta.OBJECT_ID
+INNER JOIN sys.schemas sc
+    ON ta.schema_id = sc.schema_id
+WHERE ta.is_ms_shipped = 0 AND pa.index_id IN (1,0)
+GROUP BY sc.name,ta.name
+ORDER BY SUM(pa.rows) DESC
+"""
+
+
+# In[13]:
+
+
+mc = """
+select TABLE_CATALOG as TableCatelog 
+              , TABLE_SCHEMA + '.' + TABLE_NAME as TableName
+              , COLUMN_NAME as ColumnName
+              , IS_NULLABLE as ColumnNullable
+              , DATA_TYPE as ColumnDataType
+              ,CHARACTER_MAXIMUM_LENGTH as ColumnMaxLength
+from INFORMATION_SCHEMA.COLUMNS
+order by TABLE_NAME
+"""
+
+
+# In[14]:
+
+
+# execute create table
+try:
+    datalab_cursor.execute(query2)
+    datalab_conn.commit()
+except pyodbc.ProgrammingError:
+    pass
+
+
+# In[15]:
+
+
+# execute create table
+try:
+    datalab_cursor.execute(query3)
+    datalab_conn.commit()
+except pyodbc.ProgrammingError:
+    pass
+
+
+# In[16]:
+
+
+# execute create table
+try:
+    datalab_cursor.execute(query)
+    datalab_conn.commit()
+except pyodbc.ProgrammingError:
+    pass
+
+
+# In[17]:
+
+
+df = pd.read_sql(mc,mc_conn)
+
+
+# In[18]:
+
+
+df
+
+
+# In[19]:
+
+
+df['ColumnMaxLength'] = df['ColumnMaxLength'].astype('Int64')
+
+
+# In[20]:
+
+
+datalab_cursor.close()
+datalab_conn.close()
+
+
+# In[21]:
+
+
+length = len(df.columns)
+
+
+# In[22]:
+
+
+start_time = time.time()
+df.to_sql("metadata_table_schema", engine, chunksize = int(2100/length)-1, method='multi', index=False, if_exists='append', schema="dbo")
+print("--- %d seconds ---" % (time.time() - start_time))
+
+
+# In[ ]:
+
+
+
+
