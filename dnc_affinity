@@ -1,0 +1,173 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
+import pandas as pd
+import pyodbc
+import numpy as np
+from datetime import datetime
+import os
+import datetime
+import openpyxl
+import glob
+from collections import Iterable
+import os.path, time
+import smtplib, ssl
+import glob
+import datetime
+import sqlalchemy as sa
+import pandas as pd
+import shutil
+import numpy as np
+import codecs
+from sqlalchemy import create_engine, MetaData, Table, event
+from sqlalchemy.orm import mapper
+from sqlalchemy.sql import select
+import time
+
+import os
+from fast_to_sql.fast_to_sql import fast_to_sql
+from datetime import datetime
+import fnmatch
+import sys
+from datetime import datetime
+import os
+import datetime
+
+
+# In[2]:
+
+
+conn = pyodbc.connect('Driver={SQL Server};'
+                      'Server=CPCWVISSSQLD02\DSC2D;'
+                      'Database=CS_360SELL_D1;'
+                      'Trusted_Connection=yes;'
+                     )
+
+cursor = conn.cursor()
+
+
+# In[3]:
+
+
+
+SERVER='CPCWVISSSQLD02\DSC2D'
+DATABASE='CS_360SELL_D1'
+DRIVER='SQL Server Native Client 11.0'
+
+
+# In[4]:
+
+
+engine = create_engine('mssql+pyodbc://@' + SERVER + '/' + DATABASE + '?driver=SQL+Server', fast_executemany=True)
+connection = engine.connect()
+
+
+# In[5]:
+
+
+os.chdir(r"\\entsserver24.americas.manulife.net\dfs\shared\can\affinity\admdownload\Donotcall\Archive")
+
+
+# In[6]:
+
+
+df = pd.read_csv('DNC.csv',encoding="ISO-8859-1", low_memory=False, dtype={' MOBILE_NUMBER':str})
+
+
+# In[7]:
+
+
+df
+
+
+# In[8]:
+
+
+df.columns = df.columns.str.strip()
+
+
+# In[9]:
+
+
+df.columns = df.columns.str.replace('.', '')
+
+
+# In[10]:
+
+
+# df['MOBILE_NUMBER'] = df['MOBILE_NUMBER'].apply(lambda x: '{}'.format(x))
+
+
+# In[11]:
+
+
+df['MOBILE_NUMBER'].unique()
+
+
+# In[12]:
+
+
+# df['MOBILE_NUMBER'] = df['MOBILE_NUMBER'].replace('\.0', '')
+
+
+# In[13]:
+
+
+df['Active_record_ind'] = 'Y'
+
+
+# In[14]:
+
+
+df['Last_updated_date'] = datetime.datetime.now()
+df['Last_updated_date'] = df['Last_updated_date'].dt.strftime('%Y-%m-%d')
+
+
+# In[15]:
+
+
+df
+
+
+# In[16]:
+
+
+neworder = ['RECORD_NUMBER', 'CREATED_DT', 'CREATED_BY', 'CONTACT_MODE_MAIL_IND',
+       'CONTACT_MODE_PHONE_IND', 'CONTACT_MODE_EMAIL_IND', 'ADDRESS_1',
+       'ADDRESS_2', 'CITY', 'PROVINCE_ID', 'POSTAL_CODE', 'PHONE_NUMBER',
+       'EMAIL_ADDRESS', 'FIRST_NAME', 'LAST_NAME', 'COMPANY_NAME',
+       'DIVISION_NAME', 'SPONSOR_ID', 'POLICY_NUMBER', 'ADVISOR_NAME',
+       'ADVISOR_CODE', 'MOD_DT', 'RMOD_BY', 'Active_record_ind',
+       'Last_updated_date', 'CONTACT_MODE_MOBILE_IND',
+       'MOBILE_NUMBER', 'REQUESTED_DT']
+df = df.reindex(columns=neworder)
+
+
+# In[17]:
+
+
+df
+
+
+# In[18]:
+
+
+length = len(df.columns)
+
+
+# In[19]:
+
+
+start_time = time.time()
+df.to_sql("ref_dnc_customer_affinity", engine, chunksize = int(2100/length)-1, method='multi', index=False, if_exists='replace', schema="dbo")
+print("--- %d seconds ---" % (time.time() - start_time))
+
+
+# In[ ]:
+
+
+
+
